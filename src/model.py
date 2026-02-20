@@ -1,167 +1,115 @@
-"""
-model.py - Model training, saving, and loading (GPU-aware for deep models).
-"""
-
 import os
 import joblib
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
 
-# ---------------------------------------------------------------------------
-# GPU detection
-# ---------------------------------------------------------------------------
-
 def get_device():
-    """Return 'cuda' if a GPU is available, else 'cpu'."""
+    """Return 'cuda' when a GPU is available, otherwise 'cpu'."""
     try:
         import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        hw = "cuda" if torch.cuda.is_available() else "cpu"
     except ImportError:
-        device = "cpu"
-    print(f"[model] Using device: {device}")
-    return device
+        hw = "cpu"
+    print(f"Using device: {hw}")
+    return hw
 
 
-# ---------------------------------------------------------------------------
-# Baseline model (Logistic Regression - CPU, but fast enough)
-# ---------------------------------------------------------------------------
-
-def train_baseline(X_train, y_train, max_iter: int = 1000):
-    """
-    Train a Logistic Regression baseline with balanced class weights.
-
-    Returns
-    -------
-    model : LogisticRegression
-    """
-    model = LogisticRegression(
+def train_baseline(x_train, y_train, max_iter=1000):
+    """Fit a Logistic Regression with balanced class weights."""
+    lr = LogisticRegression(
         class_weight="balanced",
         max_iter=max_iter,
         solver="lbfgs",
         C=1.0,
         random_state=42,
     )
-    model.fit(X_train, y_train)
-    return model
+    lr.fit(x_train, y_train)
+    return lr
 
-
-# ---------------------------------------------------------------------------
-# Advanced model (DistilBERT on GPU)
-# ---------------------------------------------------------------------------
 
 def train_distilbert(
-    train_texts,
-    train_labels,
-    val_texts=None,
-    val_labels=None,
-    model_name: str = "distilbert-base-uncased",
-    epochs: int = 3,
-    batch_size: int = 16,
-    learning_rate: float = 2e-5,
-    output_dir: str = "data/processed/distilbert_model",
+    train_texts, train_labels,
+    val_texts=None, val_labels=None,
+    model_name="distilbert-base-uncased",
+    epochs=3, batch_size=16, learning_rate=2e-5,
+    output_dir="data/processed/distilbert_model",
 ):
-    """
-    Fine-tune DistilBERT for binary classification (GPU-accelerated).
-
-    Returns
-    -------
-    trainer : transformers.Trainer
-    tokenizer : transformers.AutoTokenizer
-    """
+    """Fine-tune DistilBERT for binary text classification."""
     import torch
     from transformers import (
-        AutoTokenizer,
-        AutoModelForSequenceClassification,
-        Trainer,
-        TrainingArguments,
+        AutoTokenizer, AutoModelForSequenceClassification,
+        Trainer, TrainingArguments,
     )
     from torch.utils.data import Dataset
+    from sklearn.metrics import accuracy_score, f1_score
 
-    device = get_device()
+    hw = get_device()
+    tok = AutoTokenizer.from_pretrained(model_name)
 
-    # ---- Tokenize ----
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-    class MHDataset(Dataset):
-        def __init__(self, texts, labels, tokenizer, max_len=256):
-            self.encodings = tokenizer(
-                list(texts),
-                truncation=True,
-                padding=True,
-                max_length=max_len,
-                return_tensors="pt",
+    class TextDataset(Dataset):
+        def __init__(self, texts, labels, tokeniser, max_len=256):
+            self.enc = tokeniser(
+                list(texts), truncation=True, padding=True,
+                max_length=max_len, return_tensors="pt",
             )
-            self.labels = torch.tensor(list(labels), dtype=torch.long)
+            self.targets = torch.tensor(list(labels), dtype=torch.long)
 
         def __len__(self):
-            return len(self.labels)
+            return len(self.targets)
 
         def __getitem__(self, idx):
-            item = {k: v[idx] for k, v in self.encodings.items()}
-            item["labels"] = self.labels[idx]
+            item = {k: v[idx] for k, v in self.enc.items()}
+            item["labels"] = self.targets[idx]
             return item
 
-    train_dataset = MHDataset(train_texts, train_labels, tokenizer)
-    val_dataset = MHDataset(val_texts, val_labels, tokenizer) if val_texts is not None else None
+    ds_train = TextDataset(train_texts, train_labels, tok)
+    ds_val = TextDataset(val_texts, val_labels, tok) if val_texts is not None else None
 
-    # ---- Model ----
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
-    model.to(device)
+    classifier = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+    classifier.to(hw)
 
-    # ---- Training Args (GPU-optimised) ----
-    training_args = TrainingArguments(
+    training_cfg = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=epochs,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size * 2,
         learning_rate=learning_rate,
         weight_decay=0.01,
-        eval_strategy="epoch" if val_dataset else "no",
+        eval_strategy="epoch" if ds_val else "no",
         save_strategy="epoch",
-        load_best_model_at_end=bool(val_dataset),
+        load_best_model_at_end=bool(ds_val),
         logging_steps=50,
-        fp16=torch.cuda.is_available(),   # Mixed precision on GPU
+        fp16=torch.cuda.is_available(),
         report_to="none",
         seed=42,
     )
 
-    # ---- Metrics callback ----
-    from sklearn.metrics import accuracy_score, f1_score
-
-    def compute_metrics(eval_pred):
+    def _metrics(eval_pred):
         logits, labels = eval_pred
-        preds = np.argmax(logits, axis=-1)
+        predicted = np.argmax(logits, axis=-1)
         return {
-            "accuracy": accuracy_score(labels, preds),
-            "f1": f1_score(labels, preds, average="binary"),
+            "accuracy": accuracy_score(labels, predicted),
+            "f1": f1_score(labels, predicted, average="binary"),
         }
 
     trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        compute_metrics=compute_metrics,
+        model=classifier, args=training_cfg,
+        train_dataset=ds_train, eval_dataset=ds_val,
+        compute_metrics=_metrics,
     )
-
-    print(f"[model] Training DistilBERT on {device} for {epochs} epochs ...")
     trainer.train()
-    return trainer, tokenizer
+    return trainer, tok
 
 
-# ---------------------------------------------------------------------------
-# Persistence
-# ---------------------------------------------------------------------------
-
-def save_model(model, vectorizer, path: str = "data/processed/model_artifacts.joblib"):
-    """Save model and vectorizer together."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    joblib.dump({"model": model, "vectorizer": vectorizer}, path)
-    print(f"[model] Saved → {path}")
+def save_model(trained_model, fitted_vectorizer, filepath="data/processed/model_artifacts.joblib"):
+    """Bundle model + vectorizer into one joblib file."""
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    joblib.dump({"model": trained_model, "vectorizer": fitted_vectorizer}, filepath)
+    print(f"Model saved -> {filepath}")
 
 
-def load_model(path: str = "data/processed/model_artifacts.joblib"):
-    """Load model and vectorizer."""
-    artifacts = joblib.load(path)
-    return artifacts["model"], artifacts["vectorizer"]
+def load_model(filepath="data/processed/model_artifacts.joblib"):
+    """Reload the model + vectorizer bundle."""
+    bundle = joblib.load(filepath)
+    return bundle["model"], bundle["vectorizer"]

@@ -1,7 +1,3 @@
-"""
-bias.py - Engagement-group labelling and False Positive Rate analysis.
-"""
-
 import numpy as np
 import pandas as pd
 from scipy.stats import chi2_contingency
@@ -11,124 +7,66 @@ nltk.download("vader_lexicon", quiet=True)
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 
-# ---------------------------------------------------------------------------
-# Engagement group labelling
-# ---------------------------------------------------------------------------
-
-def label_engagement_groups(df: pd.DataFrame, col: str = "word_count") -> pd.DataFrame:
+def label_engagement_groups(dataframe, col="word_count"):
     """
-    Label each row as 'high', 'mid', or 'low' engagement based on quantiles
-    of the specified column.
-
-    Also adds a 'sentiment_group' column using VADER compound score.
+    Split rows into low / mid / high engagement using quantile thresholds.
+    Also adds a sentiment_group column based on VADER compound intensity.
     """
-    df = df.copy()
-
-    q25 = df[col].quantile(0.25)
-    q75 = df[col].quantile(0.75)
+    df = dataframe.copy()
+    lower_q, upper_q = df[col].quantile(0.25), df[col].quantile(0.75)
 
     df["engagement_group"] = pd.cut(
-        df[col],
-        bins=[-np.inf, q25, q75, np.inf],
-        labels=["low", "mid", "high"],
+        df[col], bins=[-np.inf, lower_q, upper_q, np.inf], labels=["low", "mid", "high"],
     )
 
-    # Sentiment intensity via VADER
-    sia = SentimentIntensityAnalyzer()
+    analyser = SentimentIntensityAnalyzer()
     df["vader_compound"] = df["text"].apply(
-        lambda t: sia.polarity_scores(t)["compound"] if isinstance(t, str) else 0.0
+        lambda t: analyser.polarity_scores(t)["compound"] if isinstance(t, str) else 0.0
     )
-    # Bucket absolute compound into low / mid / high intensity
-    abs_compound = df["vader_compound"].abs()
-    sq25 = abs_compound.quantile(0.25)
-    sq75 = abs_compound.quantile(0.75)
+    abs_sent = df["vader_compound"].abs()
+    s_lo, s_hi = abs_sent.quantile(0.25), abs_sent.quantile(0.75)
     df["sentiment_group"] = pd.cut(
-        abs_compound,
-        bins=[-np.inf, sq25, sq75, np.inf],
-        labels=["low", "mid", "high"],
+        abs_sent, bins=[-np.inf, s_lo, s_hi, np.inf], labels=["low", "mid", "high"],
     )
-
     return df
 
 
-# ---------------------------------------------------------------------------
-# FPR by group
-# ---------------------------------------------------------------------------
-
-def compute_fpr_by_group(y_true, y_pred, groups) -> dict:
-    """
-    Compute False Positive Rate for each group.
-
-    FPR = FP / (FP + TN)
-
-    Returns
-    -------
-    dict  {group_label: fpr}
-    """
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    groups = np.array(groups)
-
-    fpr_dict = {}
-    for grp in np.unique(groups):
-        mask = groups == grp
-        yt = y_true[mask]
-        yp = y_pred[mask]
-
-        fp = np.sum((yp == 1) & (yt == 0))
-        tn = np.sum((yp == 0) & (yt == 0))
-        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-        fpr_dict[grp] = fpr
-
-    return fpr_dict
+def compute_fpr_by_group(y_true, y_pred, groups):
+    """Return {group_label: false_positive_rate} for each unique group."""
+    y_true, y_pred, groups = np.array(y_true), np.array(y_pred), np.array(groups)
+    rates = {}
+    for g in np.unique(groups):
+        mask = groups == g
+        fp = np.sum((y_pred[mask] == 1) & (y_true[mask] == 0))
+        tn = np.sum((y_pred[mask] == 0) & (y_true[mask] == 0))
+        rates[g] = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    return rates
 
 
-# ---------------------------------------------------------------------------
-# Statistical significance
-# ---------------------------------------------------------------------------
+def run_significance_test(y_true, y_pred, groups, group_a, group_b):
+    """Chi-square comparison of false-positive rates between two groups."""
+    y_true, y_pred, groups = np.array(y_true), np.array(y_pred), np.array(groups)
 
-def run_significance_test(y_true, y_pred, groups, group_a: str, group_b: str) -> dict:
-    """
-    Chi-square test comparing FPR between two groups.
-
-    Returns
-    -------
-    dict with keys: chi2, p_value, group_a_fpr, group_b_fpr, significant (bool)
-    """
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    groups = np.array(groups)
-
-    def _contingency(grp):
-        mask = groups == grp
-        yt = y_true[mask]
-        yp = y_pred[mask]
-        fp = np.sum((yp == 1) & (yt == 0))
-        tn = np.sum((yp == 0) & (yt == 0))
+    def _counts(g):
+        mask = groups == g
+        fp = np.sum((y_pred[mask] == 1) & (y_true[mask] == 0))
+        tn = np.sum((y_pred[mask] == 0) & (y_true[mask] == 0))
         return fp, tn
 
-    fp_a, tn_a = _contingency(group_a)
-    fp_b, tn_b = _contingency(group_b)
-
-    # 2×2 contingency table: rows = groups, cols = [FP, TN]
+    fp_a, tn_a = _counts(group_a)
+    fp_b, tn_b = _counts(group_b)
     table = np.array([[fp_a, tn_a], [fp_b, tn_b]])
 
-    # Guard against zero rows/cols
     if table.sum() == 0 or np.any(table.sum(axis=1) == 0):
-        return {
-            "chi2": 0.0, "p_value": 1.0,
-            "group_a_fpr": 0.0, "group_b_fpr": 0.0,
-            "significant": False,
-        }
+        return {"chi2": 0.0, "p_value": 1.0,
+                f"{group_a}_fpr": 0.0, f"{group_b}_fpr": 0.0, "significant": False}
 
-    chi2, p, _, _ = chi2_contingency(table, correction=True)
+    chi2_stat, p_val, _, _ = chi2_contingency(table, correction=True)
     fpr_a = fp_a / (fp_a + tn_a) if (fp_a + tn_a) > 0 else 0.0
     fpr_b = fp_b / (fp_b + tn_b) if (fp_b + tn_b) > 0 else 0.0
 
     return {
-        "chi2": float(chi2),
-        "p_value": float(p),
-        f"{group_a}_fpr": fpr_a,
-        f"{group_b}_fpr": fpr_b,
-        "significant": p < 0.05,
+        "chi2": float(chi2_stat), "p_value": float(p_val),
+        f"{group_a}_fpr": fpr_a, f"{group_b}_fpr": fpr_b,
+        "significant": p_val < 0.05,
     }

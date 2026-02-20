@@ -1,8 +1,3 @@
-"""
-robustness.py - Text perturbation engine and flip rate computation.
-"""
-
-import re
 import random
 import numpy as np
 import nltk
@@ -15,7 +10,6 @@ from nltk.corpus import wordnet, stopwords
 
 STOPWORDS = set(stopwords.words("english"))
 
-# Default mental health trigger keywords (same as explainability lexicon)
 TRIGGER_KEYWORDS = {
     "sad", "hopeless", "alone", "suicide", "tired", "worthless",
     "depressed", "anxious", "empty", "pain", "die", "help",
@@ -25,99 +19,60 @@ TRIGGER_KEYWORDS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Perturbation functions
-# ---------------------------------------------------------------------------
-
-def remove_keywords(text: str, keywords: set[str] | None = None) -> str:
-    """Remove all occurrences of trigger keywords from text."""
+def remove_keywords(text, keywords=None):
+    """Delete every occurrence of the trigger keywords from the input."""
     if keywords is None:
         keywords = TRIGGER_KEYWORDS
-    words = text.split()
-    return " ".join(w for w in words if w.lower() not in keywords)
+    return " ".join(w for w in text.split() if w.lower() not in keywords)
 
 
-def synonym_replace(text: str, n: int = 3, rng_seed: int | None = None) -> str:
-    """
-    Replace up to n random content words with WordNet synonyms.
-    """
+def synonym_replace(text, n=3, rng_seed=None):
+    """Swap up to n content words with WordNet synonyms."""
     rng = random.Random(rng_seed)
-    words = text.split()
-    content_indices = [
-        i for i, w in enumerate(words)
-        if w.lower() not in STOPWORDS and len(w) > 2
-    ]
+    tokens = text.split()
+    eligible = [i for i, w in enumerate(tokens) if w.lower() not in STOPWORDS and len(w) > 2]
 
-    if not content_indices:
+    if not eligible:
         return text
 
-    replace_indices = rng.sample(content_indices, min(n, len(content_indices)))
-
-    for idx in replace_indices:
-        word = words[idx]
-        syns = wordnet.synsets(word)
-        if syns:
-            lemmas = [
-                l.name().replace("_", " ")
-                for s in syns
-                for l in s.lemmas()
-                if l.name().lower() != word.lower()
+    picked = rng.sample(eligible, min(n, len(eligible)))
+    for idx in picked:
+        synsets = wordnet.synsets(tokens[idx])
+        if synsets:
+            alternatives = [
+                lem.name().replace("_", " ")
+                for syn in synsets for lem in syn.lemmas()
+                if lem.name().lower() != tokens[idx].lower()
             ]
-            if lemmas:
-                words[idx] = rng.choice(lemmas)
+            if alternatives:
+                tokens[idx] = rng.choice(alternatives)
+    return " ".join(tokens)
 
-    return " ".join(words)
 
-
-# ---------------------------------------------------------------------------
-# Robustness test runner
-# ---------------------------------------------------------------------------
-
-def robustness_test(model, vectorizer, texts, perturbation_fn, **fn_kwargs) -> dict:
+def robustness_test(classifier, vectorizer, texts, perturbation_fn, **kwargs):
     """
-    Apply a perturbation to each text, re-predict, and compute flip rate.
-
-    Parameters
-    ----------
-    model : sklearn estimator
-    vectorizer : fitted TfidfVectorizer
-    texts : list of str
-    perturbation_fn : callable(text, **kwargs) -> str
-    fn_kwargs : extra kwargs for perturbation_fn
-
-    Returns
-    -------
-    dict with keys:
-        flip_rate        : float (0-1)
-        n_flips          : int
-        n_total          : int
-        flip_flags       : np.ndarray of bool
-        original_conf    : np.ndarray
-        perturbed_conf   : np.ndarray
-        original_preds   : np.ndarray
-        perturbed_preds  : np.ndarray
+    Apply a perturbation to every text, re-predict, and measure how
+    often the label flips.
     """
     texts = list(texts)
 
-    # Original predictions
-    X_orig = vectorizer.transform(texts)
-    orig_preds = model.predict(X_orig)
-    orig_probs = model.predict_proba(X_orig)[:, 1]
+    x_orig = vectorizer.transform(texts)
+    orig_labels = classifier.predict(x_orig)
+    orig_confidence = classifier.predict_proba(x_orig)[:, 1]
 
-    # Perturbed predictions
-    perturbed_texts = [perturbation_fn(t, **fn_kwargs) for t in texts]
-    X_pert = vectorizer.transform(perturbed_texts)
-    pert_preds = model.predict(X_pert)
-    pert_probs = model.predict_proba(X_pert)[:, 1]
+    altered = [perturbation_fn(t, **kwargs) for t in texts]
+    x_alt = vectorizer.transform(altered)
+    new_labels = classifier.predict(x_alt)
+    new_confidence = classifier.predict_proba(x_alt)[:, 1]
 
-    flips = orig_preds != pert_preds
+    flipped = orig_labels != new_labels
     return {
-        "flip_rate": float(flips.mean()),
-        "n_flips": int(flips.sum()),
+        "flip_rate": float(flipped.mean()),
+        "n_flips": int(flipped.sum()),
         "n_total": len(texts),
-        "flip_flags": flips,
-        "original_conf": orig_probs,
-        "perturbed_conf": pert_probs,
-        "original_preds": orig_preds,
-        "perturbed_preds": pert_preds,
+        "flip_flags": flipped,
+        "original_conf": orig_confidence,
+        "perturbed_conf": new_confidence,
+        "original_preds": orig_labels,
+        "perturbed_preds": new_labels,
     }

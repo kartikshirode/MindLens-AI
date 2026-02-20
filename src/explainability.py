@@ -1,24 +1,16 @@
-"""
-explainability.py - SHAP, LIME wrappers and quantitative interpretability score.
-"""
-
 import numpy as np
 import shap
 from lime.lime_text import LimeTextExplainer
 
-
-# ---------------------------------------------------------------------------
-# Mental health lexicon (expanded for TF-IDF bigram coverage)
-# ---------------------------------------------------------------------------
-
-MH_LEXICON = {
-    # Core depression / mood terms
+# Vocabulary of words and word-stems relevant to mental health.
+# We use this to check whether the model's influential features
+# actually correspond to clinically meaningful language.
+mental_health_vocabulary = {
     "sad", "hopeless", "alone", "suicide", "tired", "worthless",
     "depressed", "anxious", "empty", "pain", "die", "help",
     "crying", "lost", "hate", "suffer", "miserable", "numb",
     "angry", "scared", "hurt", "broken", "overwhelmed", "desperate",
     "lonely", "useless", "failure", "guilt", "ashamed", "isolat",
-    # Expanded clinical & conversational terms
     "depression", "anxiety", "stress", "trauma", "therapy", "therapist",
     "medication", "mental", "health", "disorder", "diagnosis", "symptom",
     "insomnia", "sleep", "fatigue", "exhausted", "restless",
@@ -52,127 +44,56 @@ MH_LEXICON = {
 }
 
 
-# ---------------------------------------------------------------------------
-# LIME
-# ---------------------------------------------------------------------------
-
-def explain_lime(model, vectorizer, text: str, num_features: int = 10, class_names=None):
-    """
-    Generate a LIME explanation for a single text.
-
-    Parameters
-    ----------
-    model : sklearn estimator with predict_proba
-    vectorizer : fitted TfidfVectorizer
-    text : input text string
-    num_features : number of top features to show
-
-    Returns
-    -------
-    explanation : lime Explanation object
-    """
+def explain_with_lime(classifier, vectorizer, text, num_features=10, class_names=None):
+    """Build a LIME explanation for one text sample."""
     if class_names is None:
         class_names = ["No Risk", "Risk"]
 
     explainer = LimeTextExplainer(class_names=class_names, random_state=42)
 
-    def predict_fn(texts):
-        X = vectorizer.transform(texts)
-        return model.predict_proba(X)
+    def _predict(texts):
+        return classifier.predict_proba(vectorizer.transform(texts))
 
-    explanation = explainer.explain_instance(
-        text,
-        predict_fn,
-        num_features=num_features,
-        num_samples=2000,
-    )
-    return explanation
+    return explainer.explain_instance(text, _predict, num_features=num_features, num_samples=2000)
 
 
-# ---------------------------------------------------------------------------
-# SHAP
-# ---------------------------------------------------------------------------
+def explain_with_shap(classifier, x_train, x_test, feature_names):
+    """Compute SHAP values via LinearExplainer."""
+    explainer = shap.LinearExplainer(classifier, x_train, feature_perturbation="interventional")
+    values = explainer.shap_values(x_test)
+    return values, explainer
 
-def explain_shap(model, X_train_tfidf, X_test_tfidf, feature_names):
+
+def shap_summary(shap_values, x_test, feature_names, max_display=20):
+    """Render the SHAP beeswarm summary."""
+    shap.summary_plot(shap_values, x_test, feature_names=feature_names,
+                      max_display=max_display, show=True)
+
+
+def shap_single_force_plot(explainer, shap_values, sample_index, feature_names):
+    """Render a SHAP force plot for one observation."""
+    return shap.force_plot(explainer.expected_value, shap_values[sample_index],
+                           feature_names=feature_names, matplotlib=True)
+
+
+def interpretability_score(shap_values, feature_names, vocabulary=None, k=10):
     """
-    Compute SHAP values using LinearExplainer (for Logistic Regression).
-
-    Returns
-    -------
-    shap_values : np.ndarray  (n_test_samples, n_features)
-    explainer   : shap.LinearExplainer
+    For every sample, count how many of the top-k SHAP features appear
+    in the mental-health vocabulary. Score = overlap / k.
     """
-    explainer = shap.LinearExplainer(model, X_train_tfidf, feature_perturbation="interventional")
-    shap_values = explainer.shap_values(X_test_tfidf)
-    return shap_values, explainer
-
-
-def shap_summary_plot(shap_values, X_test_tfidf, feature_names, max_display: int = 20):
-    """Display a SHAP summary (beeswarm) plot."""
-    shap.summary_plot(
-        shap_values,
-        X_test_tfidf,
-        feature_names=feature_names,
-        max_display=max_display,
-        show=True,
-    )
-
-
-def shap_force_plot(explainer, shap_values, idx: int, feature_names):
-    """Generate a SHAP force plot for a single sample."""
-    return shap.force_plot(
-        explainer.expected_value,
-        shap_values[idx],
-        feature_names=feature_names,
-        matplotlib=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Quantitative Interpretability Score
-# ---------------------------------------------------------------------------
-
-def compute_interpretability_score(
-    shap_values: np.ndarray,
-    feature_names: list[str],
-    lexicon: set[str] | None = None,
-    k: int = 10,
-) -> dict:
-    """
-    Measure how many of the top-k SHAP features overlap with a mental health
-    lexicon.
-
-    Interpretability Score = (# top-k features overlapping lexicon) / k
-
-    Parameters
-    ----------
-    shap_values : (n_samples, n_features) array
-    feature_names : list of feature names (from TF-IDF vocabulary)
-    lexicon : set of mental health keywords (defaults to MH_LEXICON)
-    k : number of top features to check
-
-    Returns
-    -------
-    dict with keys: per_sample_scores (array), mean_score, std_score
-    """
-    if lexicon is None:
-        lexicon = MH_LEXICON
+    if vocabulary is None:
+        vocabulary = mental_health_vocabulary
 
     feature_names = np.array(feature_names)
-    per_sample_scores = []
+    per_sample = []
 
-    for i in range(shap_values.shape[0]):
-        abs_vals = np.abs(shap_values[i])
-        top_k_idx = np.argsort(abs_vals)[-k:]
-        top_k_words = set(feature_names[top_k_idx])
+    for row in range(shap_values.shape[0]):
+        top_k_idx = np.argsort(np.abs(shap_values[row]))[-k:]
+        top_words = set(feature_names[top_k_idx])
+        overlap = sum(1 for w in top_words if any(term in w for term in vocabulary))
+        per_sample.append(overlap / k)
 
-        overlap = sum(
-            1 for w in top_k_words
-            if any(lex_word in w for lex_word in lexicon)
-        )
-        per_sample_scores.append(overlap / k)
-
-    scores = np.array(per_sample_scores)
+    scores = np.array(per_sample)
     return {
         "per_sample_scores": scores,
         "mean_score": float(scores.mean()),

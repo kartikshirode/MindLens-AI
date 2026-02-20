@@ -1,0 +1,16 @@
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+shap
+lime
+nltk
+wordcloud
+joblib
+scipy
+streamlit
+transformers
+sentence-transformers
+torch
+accelerate

@@ -8,15 +8,47 @@ from lime.lime_text import LimeTextExplainer
 
 
 # ---------------------------------------------------------------------------
-# Mental health lexicon (starter set)
+# Mental health lexicon (expanded for TF-IDF bigram coverage)
 # ---------------------------------------------------------------------------
 
 MH_LEXICON = {
+    # Core depression / mood terms
     "sad", "hopeless", "alone", "suicide", "tired", "worthless",
     "depressed", "anxious", "empty", "pain", "die", "help",
     "crying", "lost", "hate", "suffer", "miserable", "numb",
     "angry", "scared", "hurt", "broken", "overwhelmed", "desperate",
     "lonely", "useless", "failure", "guilt", "ashamed", "isolat",
+    # Expanded clinical & conversational terms
+    "depression", "anxiety", "stress", "trauma", "therapy", "therapist",
+    "medication", "mental", "health", "disorder", "diagnosis", "symptom",
+    "insomnia", "sleep", "fatigue", "exhausted", "restless",
+    "suicidal", "ideation", "self", "harm", "cutting", "overdose",
+    "panic", "attack", "phobia", "ptsd", "bipolar", "mania",
+    "mood", "emotion", "feeling", "feel", "felt",
+    "cry", "cried", "tear", "sobbing",
+    "worry", "worrie", "fear", "dread", "terrif",
+    "isol", "withdraw", "detach", "disconnect",
+    "reject", "abandon", "neglect", "abuse",
+    "burden", "exhaust", "drain", "burn",
+    "disappoint", "regret", "shame", "embarrass",
+    "confus", "frustrat", "irritat", "agitat",
+    "helpless", "powerless", "trapped", "stuck",
+    "meaningless", "pointless", "purpose",
+    "death", "dead", "kill", "end", "life", "live", "alive",
+    "drug", "alcohol", "addict", "substance",
+    "counselor", "psychiatr", "psycholog", "doctor",
+    "diagnos", "treat", "recover", "cope", "coping",
+    "support", "talk", "listen", "understand",
+    "friend", "family", "relationship", "partner",
+    "work", "job", "school", "college",
+    "money", "financial", "debt",
+    "weight", "eat", "food", "appetite", "binge", "purg",
+    "think", "thought", "mind", "brain", "head",
+    "night", "day", "morning", "wake", "bed",
+    "want", "need", "wish", "hope", "try",
+    "can", "anymore", "nothing", "everything", "always", "never",
+    "know", "better", "worse", "bad", "good", "normal",
+    "people", "person", "someone", "anyone", "nobody", "everybody",
 }
 
 

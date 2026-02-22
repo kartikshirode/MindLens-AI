@@ -1,10 +1,10 @@
 # MindLens-AI
 
-Explainable mental health risk detection from social media text. Built around a logistic regression classifier on Reddit data, with SHAP/LIME explanations, bias auditing, and robustness testing.
+Explainable mental health risk detection from social media text. Built around a logistic regression classifier on the Reddit Mental Health Dataset (RMHD), with SHAP/LIME explanations, bias auditing, and robustness testing.
 
 ## What This Project Does
 
-Given a piece of text (e.g. a Reddit post), the model predicts whether it signals depression risk. Beyond making predictions, the project investigates three research questions:
+Given a piece of text (e.g. a Reddit post), the model predicts whether it signals mental-health risk. Binary labels are constructed from subreddit membership: posts from r/depression and r/SuicideWatch are labelled Risk (1), while posts from r/Anxiety, r/lonely, and r/mentalhealth are labelled Control (0). Beyond making predictions, the project investigates three research questions:
 
 1. **Can the model's decisions be meaningfully interpreted?** We use SHAP and LIME to extract the features driving each prediction, and check whether clinically relevant terms (e.g. "hopeless", "insomnia", "therapy") actually appear among the top contributors.
 
@@ -16,13 +16,13 @@ Given a piece of text (e.g. a Reddit post), the model predicts whether it signal
 
 | Metric | Value |
 |--------|-------|
-| Test Accuracy | 96.1% |
-| F1 Score | 95.9% |
-| FPR Gap (engagement groups) | 0.003 |
-| Keyword-removal flip rate | 0.3% |
-| Synonym-replacement flip rate | 4.0% |
+| Test Accuracy | TBD (re-run notebooks) |
+| F1 Score | TBD |
+| FPR Gap (engagement groups) | TBD |
+| Keyword-removal flip rate | TBD |
+| Synonym-replacement flip rate | TBD |
 
-The model is accurate, shows no meaningful bias between groups (p = 1.0 on chi-square), and is largely stable under text perturbation.
+*Results will be populated after running notebooks 01–05 on the RMHD dataset.*
 
 ## Project Layout
 
@@ -45,7 +45,7 @@ src/
 app/
     streamlit_app.py          Interactive demo
 data/
-    raw/                      Original dataset
+    raw/                      RMHD raw data (subreddit CSVs by year/month)
     processed/                Cleaned data and saved model
 ```
 
@@ -72,7 +72,11 @@ Paste in any text and the app will show the prediction, a LIME explanation, pert
 
 ## Dataset
 
-Reddit depression dataset (cleaned), sourced from public NLP benchmarks. Binary labels: depression-indicative vs. non-depression. See notebook 01 for full exploration.
+Reddit Mental Health Dataset (RMHD) — ~1.85 million Reddit posts (2019–2022) from five mental-health subreddits: r/depression, r/SuicideWatch, r/Anxiety, r/lonely, r/mentalhealth. Binary labels are constructed via subreddit-based proxy labelling (Risk vs. No Risk). A balanced subset of 20,000 posts (10K per class) is sampled for training.
+
+**Limitation:** Subreddit-based labeling may introduce contextual bias, which is evaluated through bias and robustness analysis in later stages.
+
+See notebook 01 for full exploration.
 
 ## Dependencies
 

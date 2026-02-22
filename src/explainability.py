@@ -47,7 +47,7 @@ mental_health_vocabulary = {
 def explain_with_lime(classifier, vectorizer, text, num_features=10, class_names=None):
     """Build a LIME explanation for one text sample."""
     if class_names is None:
-        class_names = ["No Risk", "Risk"]
+        class_names = ["Control", "Risk"]
 
     explainer = LimeTextExplainer(class_names=class_names, random_state=42)
 

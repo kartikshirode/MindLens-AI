@@ -50,7 +50,7 @@ if analyze and user_text.strip():
         pred = model.predict(X)[0]
         probs = model.predict_proba(X)[0]
         confidence = float(probs[pred])
-        label = "Risk" if pred == 1 else "No Risk"
+        label = "Risk" if pred == 1 else "Control"
 
         with col2:
             st.subheader("Prediction")
@@ -72,7 +72,7 @@ if analyze and user_text.strip():
                 if score > 0:
                     st.markdown(f"- `{word}`: +{score:.3f}")
         with lime_col2:
-            st.markdown("**Words pushing toward No Risk (green):**")
+            st.markdown("**Words pushing toward Control (green):**")
             for word, score in sorted(lime_list, key=lambda x: x[1]):
                 if score < 0:
                     st.markdown(f"- `{word}`: {score:.3f}")
@@ -88,7 +88,7 @@ if analyze and user_text.strip():
             X_kw = vectorizer.transform([kw_text])
             kw_pred = model.predict(X_kw)[0]
             kw_prob = model.predict_proba(X_kw)[0]
-            kw_label = "Risk" if kw_pred == 1 else "No Risk"
+            kw_label = "Risk" if kw_pred == 1 else "Control"
 
             with pert_col1:
                 st.markdown("**Keyword Removal**")
@@ -99,7 +99,7 @@ if analyze and user_text.strip():
             X_syn = vectorizer.transform([syn_text])
             syn_pred = model.predict(X_syn)[0]
             syn_prob = model.predict_proba(X_syn)[0]
-            syn_label = "Risk" if syn_pred == 1 else "No Risk"
+            syn_label = "Risk" if syn_pred == 1 else "Control"
 
             with pert_col2:
                 st.markdown("**Synonym Replacement**")

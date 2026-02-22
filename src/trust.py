@@ -37,7 +37,7 @@ def generate_trust_report(text, classifier, vectorizer, bias_gap,
 
     return {
         "prediction": int(pred),
-        "prediction_label": "Risk" if pred == 1 else "No Risk",
+        "prediction_label": "Risk" if pred == 1 else "Control",
         "confidence": conf,
         "flip_rate": flip,
         "trust_score": score,

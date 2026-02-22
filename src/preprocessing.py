@@ -11,6 +11,91 @@ nltk.download("punkt_tab", quiet=True)
 
 STOPWORDS = set(stopwords.words("english"))
 
+# ── Subreddit-based binary labelling for RMHD ──────────────────────────
+# Risk (1): high-risk mental health communities.
+# Control (0): general mental health discussion communities.
+RISK_SUBREDDITS = {"depression", "SuicideWatch"}
+NO_RISK_SUBREDDITS = {"Anxiety", "lonely", "mentalhealth"}
+
+
+def load_rmhd_dataset(data_dir, sample_per_class=10_000, random_state=42):
+    """
+    Walk the RMHD *raw data* tree, assign binary labels from subreddit
+    names, and return a balanced DataFrame [text, label, subreddit].
+
+    Parameters
+    ----------
+    data_dir : str
+        Path to ``data/raw/Original Reddit Data/raw data``.
+    sample_per_class : int or None
+        If set, downsample each class to this many rows for tractability.
+        Pass ``None`` to keep everything (~1.8 M rows).
+    random_state : int
+        Seed for reproducible sampling.
+
+    Labelling strategy
+    ------------------
+    * **Risk (1):** posts from r/depression, r/SuicideWatch (high-risk mental health communities)
+    * **Control (0):** posts from r/Anxiety, r/lonely, r/mentalhealth (general mental health discussion communities)
+
+    **Limitation:** Subreddit-based labeling may introduce contextual bias,
+    which is evaluated through bias and robustness analysis in later stages.
+    """
+    frames = []
+    valid_subs = RISK_SUBREDDITS | NO_RISK_SUBREDDITS
+
+    for year in sorted(os.listdir(data_dir)):
+        year_path = os.path.join(data_dir, year)
+        if not os.path.isdir(year_path):
+            continue
+        for month in sorted(os.listdir(year_path)):
+            month_path = os.path.join(year_path, month)
+            if not os.path.isdir(month_path):
+                continue
+            for fname in sorted(os.listdir(month_path)):
+                if not fname.endswith(".csv"):
+                    continue
+                fpath = os.path.join(month_path, fname)
+                try:
+                    chunk = pd.read_csv(
+                        fpath,
+                        usecols=["selftext", "subreddit", "title"],
+                        engine="python",
+                        on_bad_lines="skip",
+                    )
+                    chunk = chunk[chunk["subreddit"].isin(valid_subs)]
+                    frames.append(chunk)
+                except Exception:
+                    pass  # skip malformed files silently
+
+    df = pd.concat(frames, ignore_index=True)
+
+    # Combine title + selftext into a single text field
+    df["title"] = df["title"].fillna("")
+    df["selftext"] = df["selftext"].fillna("")
+    df["text"] = (df["title"].str.strip() + " " + df["selftext"].str.strip()).str.strip()
+
+    # Binary label from subreddit
+    df["label"] = df["subreddit"].apply(lambda s: 1 if s in RISK_SUBREDDITS else 0)
+
+    # Drop empty texts and [removed] / [deleted] placeholders
+    df = df[df["text"].str.len() > 0]
+    df = df[~df["text"].str.lower().isin(["[removed]", "[deleted]", ""])]
+
+    # Balance classes via downsampling
+    if sample_per_class is not None:
+        risk = df[df["label"] == 1]
+        safe = df[df["label"] == 0]
+        n_risk = min(sample_per_class, len(risk))
+        n_safe = min(sample_per_class, len(safe))
+        risk = risk.sample(n=n_risk, random_state=random_state)
+        safe = safe.sample(n=n_safe, random_state=random_state)
+        df = pd.concat([risk, safe], ignore_index=True)
+
+    df = df[["text", "label", "subreddit"]].reset_index(drop=True)
+    print(f"RMHD loaded: {len(df)} rows  |  label distribution:\n{df['label'].value_counts().to_dict()}")
+    return df
+
 
 def load_primary_dataset(filepath):
     """Read the Reddit depression CSV into a two-column DataFrame [text, label]."""
@@ -106,6 +191,7 @@ def _normalise_label(value):
         v = value.strip().lower()
         if v in ("1", "depression", "suicide", "suicidewatch", "yes", "true", "risk"):
             return 1
-        if v in ("0", "non-depression", "no", "false", "no risk", "non-suicide"):
+        if v in ("0", "non-depression", "no", "false", "no risk", "non-suicide",
+                 "anxiety", "lonely", "mentalhealth"):
             return 0
     return None
